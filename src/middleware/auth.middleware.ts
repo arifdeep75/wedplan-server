@@ -1,9 +1,48 @@
 
 import type { Request, Response, NextFunction } from "express";
 import { ObjectId } from "mongodb";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { createAuth } from "../lib/auth.js";
 import { getDB } from "../config/db.js";
 import { USER_ROLES } from "../constants/index.js";
+
+// JWKS for verifying JWTs issued by the Better Auth jwt plugin (/api/auth/token)
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function getJWKS() {
+  if (!jwks) {
+    const baseUrl = process.env.BETTER_AUTH_URL || "http://localhost:5000";
+    jwks = createRemoteJWKSet(new URL(`${baseUrl}/api/auth/jwks`));
+  }
+
+  return jwks;
+}
+
+// Verifies an `Authorization: Bearer <jwt>` header. Returns the payload
+// (sub = user id) or null when absent/invalid.
+async function verifyBearerToken(req: Request) {
+  const header = req.headers.authorization;
+
+  if (!header || !header.toLowerCase().startsWith("bearer ")) {
+    return null;
+  }
+
+  const token = header.slice(7).trim();
+
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, getJWKS(), {
+      issuer: process.env.BETTER_AUTH_URL || "http://localhost:5000",
+    });
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 type AuthUser = {
   id: string;
@@ -15,6 +54,8 @@ type AuthUser = {
   businessName?: string | null;
   subscriptionPlan?: string;
 };
+
+export type { AuthUser };
 
 export interface AuthenticatedRequest extends Request {
   user?: AuthUser;
@@ -43,9 +84,37 @@ export async function requireAuth(
   try {
     const auth = createAuth();
 
-    const session = await auth.api.getSession({
-      headers: req.headers as HeadersInit,
+    // 1) Cookie session (browser)
+    let session = await auth.api.getSession({
+      headers: new Headers(req.headers as unknown as HeadersInit),
     });
+
+    // 2) Bearer JWT (API clients) — verified against the JWKS endpoint
+    if (!session) {
+      const payload = await verifyBearerToken(req);
+
+      if (payload?.sub) {
+        const db = getDB();
+        const isObjectId =
+          ObjectId.isValid(payload.sub) && /^[a-f\d]{24}$/i.test(payload.sub);
+        const filter: unknown = {
+          _id: isObjectId
+            ? { $in: [new ObjectId(payload.sub), payload.sub] }
+            : payload.sub,
+        };
+
+        const dbUser = (await db
+          .collection("user")
+          .findOne(filter as never)) as unknown as { _id: unknown } | null;
+
+        if (dbUser) {
+          session = {
+            user: { id: String(dbUser._id) },
+            session: { userId: String(dbUser._id) },
+          } as never;
+        }
+      }
+    }
 
     if (!session) {
       return res.status(401).json({
@@ -55,20 +124,22 @@ export async function requireAuth(
     }
 
     // Always re-read the user from the DB: never trust cached session data
-    // for role or block status.
+    // or JWT claims for role or block status — the DB is the source of truth.
+    // (Better Auth's Mongo adapter stores accounts in the singular "user"
+    // collection with ObjectId ids.)
     const db = getDB();
-    const users = db.collection("users");
+    const users = db.collection("user");
 
     let userId = session.user.id;
     let query: Record<string, unknown>;
 
-    try {
-      query = { _id: new ObjectId(userId) };
-    } catch {
+    if (ObjectId.isValid(userId) && /^[a-f\d]{24}$/i.test(userId)) {
+      query = { _id: { $in: [new ObjectId(userId), userId] } };
+    } else {
       query = { _id: userId };
     }
 
-    const dbUser = (await users.findOne(query, {
+    const dbUser = (await users.findOne(query as never, {
       projection: {
         role: 1,
         isBlocked: 1,
