@@ -6,6 +6,7 @@ import { toNodeHandler } from "better-auth/node";
 import authRoutes from "./modules/auth/auth.routes.js";
 import uploadRoutes from "./modules/uploads/upload.routes.js";
 import serviceRoutes from "./modules/services/service.routes.js";
+import bookingRoutes from "./modules/bookings/booking.routes.js";
 
 
 import { connectDB } from "./config/db.js";
@@ -53,6 +54,9 @@ async function startServer() {
 
     // Service browsing + vendor/admin service management
     app.use("/api/services", serviceRoutes);
+
+    // Booking requests and status management
+    app.use("/api/bookings", bookingRoutes);
 
     app.use("/api/auth", authRoutes);
 
