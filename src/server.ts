@@ -45,13 +45,15 @@ async function startServer() {
     app.all("/api/auth/{*any}", toNodeHandler(auth));
     
 
+    // Parse JSON bodies for all API routes (uploads re-mounts with a bigger limit)
+    app.use(express.json());
+
     // Profile image uploads need a larger JSON body limit (base64 payloads)
     app.use("/api/uploads", express.json({ limit: "6mb" }), uploadRoutes);
 
-    // Public service browsing
+    // Service browsing + vendor/admin service management
     app.use("/api/services", serviceRoutes);
 
-    app.use(express.json());
     app.use("/api/auth", authRoutes);
 
     app.get("/", (_req, res) => {
