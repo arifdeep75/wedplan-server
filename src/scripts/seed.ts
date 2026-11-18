@@ -91,11 +91,12 @@ async function seed() {
     process.exit(0);
   }
 
-  // Use the first registered vendor, or create a minimal demo vendor record
-  let vendor = await db.collection("users").findOne({ role: "vendor" });
+  // Use the first registered vendor (Better Auth stores accounts in "user"),
+  // or create a minimal demo vendor record
+  let vendor = await db.collection("user").findOne({ role: "vendor" });
 
   if (!vendor) {
-    const result = await db.collection("users").insertOne({
+    const result = await db.collection("user").insertOne({
       _id: new ObjectId(),
       name: "WedPlan Studio",
       email: "demo.vendor@wedplan.test",
@@ -109,7 +110,7 @@ async function seed() {
       updatedAt: new Date(),
     });
 
-    vendor = await db.collection("users").findOne({ _id: result.insertedId });
+    vendor = await db.collection("user").findOne({ _id: result.insertedId });
     console.log("Created demo vendor: demo.vendor@wedplan.test");
   }
 
