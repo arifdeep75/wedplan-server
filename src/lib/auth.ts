@@ -2,6 +2,7 @@
 import { betterAuth } from "better-auth";
 import { createAuthMiddleware, APIError } from "better-auth/api";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
+import { jwt, bearer } from "better-auth/plugins";
 
 import { getDB } from "../config/db.js";
 import { registerSchema } from "../modules/auth/auth.schema.js";
@@ -50,6 +51,11 @@ export function createAuth() {
         },
       },
     },
+
+    // JWT plugin: issues signed JWTs (with role/id claims) + JWKS endpoint.
+    // bearer() lets API clients use `Authorization: Bearer <jwt>` instead of
+    // cookies — getSession() accepts either.
+    plugins: [jwt(), bearer()],
 
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
