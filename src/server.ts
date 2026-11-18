@@ -8,6 +8,7 @@ import uploadRoutes from "./modules/uploads/upload.routes.js";
 import serviceRoutes from "./modules/services/service.routes.js";
 import bookingRoutes from "./modules/bookings/booking.routes.js";
 import profileRoutes from "./modules/profile/profile.routes.js";
+import adminRoutes from "./modules/admin/admin.routes.js";
 
 
 import { connectDB } from "./config/db.js";
@@ -65,6 +66,9 @@ async function startServer() {
 
     // Profile management
     app.use("/api/profile", profileRoutes);
+
+    // Admin: user management and platform stats
+    app.use("/api/admin", adminRoutes);
 
     app.get("/", (_req, res) => {
       res.send("Welcome to WedPlan API!");
