@@ -5,6 +5,7 @@ import "dotenv/config";
 import { toNodeHandler } from "better-auth/node";
 import authRoutes from "./modules/auth/auth.routes.js";
 import uploadRoutes from "./modules/uploads/upload.routes.js";
+import serviceRoutes from "./modules/services/service.routes.js";
 
 
 import { connectDB } from "./config/db.js";
@@ -46,6 +47,9 @@ async function startServer() {
 
     // Profile image uploads need a larger JSON body limit (base64 payloads)
     app.use("/api/uploads", express.json({ limit: "6mb" }), uploadRoutes);
+
+    // Public service browsing
+    app.use("/api/services", serviceRoutes);
 
     app.use(express.json());
     app.use("/api/auth", authRoutes);
