@@ -37,6 +37,10 @@ function bookings() {
   return getDB().collection("bookings");
 }
 
+function transactions() {
+  return getDB().collection("transactions");
+}
+
 function toObjectId(id: string): ObjectId | null {
   try {
     return ObjectId.isValid(id) && /^[a-f\d]{24}$/i.test(id)
@@ -169,16 +173,40 @@ export async function setUserBlocked(req: Request, res: Response) {
 // High-level counts for the admin dashboard.
 export async function getStats(_req: Request, res: Response) {
   try {
-    const [totalUsers, customers, vendors, pendingServices, approvedServices, totalBookings, pendingBookings] =
-      await Promise.all([
-        users().countDocuments({}),
-        users().countDocuments({ role: USER_ROLES.CUSTOMER }),
-        users().countDocuments({ role: USER_ROLES.VENDOR }),
-        services().countDocuments({ status: "pending" }),
-        services().countDocuments({ status: "approved" }),
-        bookings().countDocuments({}),
-        bookings().countDocuments({ status: "pending" }),
-      ]);
+    const [
+      totalUsers,
+      customers,
+      vendors,
+      pendingServices,
+      approvedServices,
+      totalBookings,
+      pendingBookings,
+      premiumVendors,
+      revenue,
+    ] = await Promise.all([
+      users().countDocuments({}),
+      users().countDocuments({ role: USER_ROLES.CUSTOMER }),
+      users().countDocuments({ role: USER_ROLES.VENDOR }),
+      services().countDocuments({ status: "pending" }),
+      services().countDocuments({ status: "approved" }),
+      bookings().countDocuments({}),
+      bookings().countDocuments({ status: "pending" }),
+      users().countDocuments({ subscriptionPlan: "premium" }),
+      transactions()
+        .aggregate([
+          { $match: { status: "paid" } },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$amount" },
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray() as unknown as Promise<
+        Array<{ total: number; count: number }>
+      >,
+    ]);
 
     return res.status(200).json({
       success: true,
@@ -190,6 +218,9 @@ export async function getStats(_req: Request, res: Response) {
         approvedServices,
         totalBookings,
         pendingBookings,
+        premiumVendors,
+        totalRevenue: revenue[0]?.total ?? 0,
+        paidTransactions: revenue[0]?.count ?? 0,
       },
     });
   } catch (error) {
@@ -198,6 +229,44 @@ export async function getStats(_req: Request, res: Response) {
     return res.status(500).json({
       success: false,
       message: "Failed to load stats",
+    });
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Platform transactions                                               */
+/* ------------------------------------------------------------------ */
+
+// Every subscription payment recorded on the platform, newest first.
+export async function listTransactions(_req: Request, res: Response) {
+  try {
+    const found = await transactions()
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .toArray();
+
+    const data = found.map((item) => ({
+      id: String(item._id),
+      vendorId: item.vendorId ?? "",
+      vendorName: item.vendorName ?? "",
+      vendorEmail: item.vendorEmail ?? "",
+      plan: item.plan ?? "premium",
+      amount: item.amount ?? 0,
+      currency: item.currency ?? "usd",
+      status: item.status ?? "pending",
+      provider: item.provider ?? "stripe",
+      createdAt: item.createdAt ?? null,
+      paidAt: item.paidAt ?? null,
+    }));
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Admin transactions error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load transactions",
     });
   }
 }

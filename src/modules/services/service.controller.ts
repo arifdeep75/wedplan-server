@@ -2,6 +2,7 @@
 import type { Request, Response } from "express";
 import { ObjectId } from "mongodb";
 import { SERVICE_CATEGORIES, FREE_VENDOR_SERVICE_LIMIT } from "../../constants/index.js";
+import { isPremiumActive } from "../../lib/subscription.js";
 import { getDB } from "../../config/db.js";
 import {
   createServiceSchema,
@@ -33,6 +34,8 @@ interface VendorDocument {
   name?: string;
   image?: string | null;
   businessName?: string | null;
+  subscriptionPlan?: string;
+  subscriptionExpiresAt?: Date | null;
 }
 
 function services() {
@@ -177,8 +180,9 @@ export async function createService(req: Request, res: Response) {
       );
     }
 
-    // Free-plan vendors can only publish a limited number of services.
-    if ((user.subscriptionPlan ?? "free") === "free") {
+    // Free-plan vendors can only publish a limited number of services; an
+    // expired premium subscription counts as free.
+    if (!isPremiumActive(user)) {
       const existing = await services().countDocuments({
         vendorId: user.id,
         status: { $ne: "rejected" },
@@ -493,7 +497,15 @@ async function withVendors(
     ? ((await users()
         .find(
           { _id: { $in: vendorIds } },
-          { projection: { name: 1, image: 1, businessName: 1 } }
+          {
+            projection: {
+              name: 1,
+              image: 1,
+              businessName: 1,
+              subscriptionPlan: 1,
+              subscriptionExpiresAt: 1,
+            },
+          }
         )
         .toArray()) as unknown as VendorDocument[])
     : [];
@@ -520,6 +532,7 @@ async function withVendors(
         name: vendor?.name ?? "WedPlan Vendor",
         image: vendor?.image ?? null,
         businessName: vendor?.businessName ?? null,
+        isPremium: isPremiumActive(vendor),
       },
     };
   });
