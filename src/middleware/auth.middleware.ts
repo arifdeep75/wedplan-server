@@ -53,6 +53,7 @@ type AuthUser = {
   image?: string | null;
   businessName?: string | null;
   subscriptionPlan?: string;
+  subscriptionExpiresAt?: Date | null;
 };
 
 export type { AuthUser };
@@ -148,6 +149,7 @@ export async function requireAuth(
         image: 1,
         businessName: 1,
         subscriptionPlan: 1,
+        subscriptionExpiresAt: 1,
       },
     })) as unknown as (AuthUser & { _id: unknown }) | null;
 
@@ -174,6 +176,7 @@ export async function requireAuth(
       image: dbUser.image ?? null,
       businessName: dbUser.businessName ?? null,
       subscriptionPlan: dbUser.subscriptionPlan,
+      subscriptionExpiresAt: dbUser.subscriptionExpiresAt ?? null,
     };
     res.locals.session = session.session;
 

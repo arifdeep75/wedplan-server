@@ -9,6 +9,8 @@ import serviceRoutes from "./modules/services/service.routes.js";
 import bookingRoutes from "./modules/bookings/booking.routes.js";
 import profileRoutes from "./modules/profile/profile.routes.js";
 import adminRoutes from "./modules/admin/admin.routes.js";
+import paymentRoutes from "./modules/payments/payment.routes.js";
+import { stripeWebhook } from "./modules/payments/payment.controller.js";
 
 
 import { connectDB } from "./config/db.js";
@@ -52,6 +54,14 @@ async function startServer() {
     app.all("/api/auth/{*any}", toNodeHandler(auth));
     
 
+    // Stripe needs the raw request body to verify its signature, so this
+    // route is mounted before express.json().
+    app.post(
+      "/api/payments/webhook",
+      express.raw({ type: "application/json" }),
+      stripeWebhook
+    );
+
     // Parse JSON bodies for all API routes (uploads re-mounts with a bigger limit)
     app.use(express.json());
 
@@ -69,6 +79,9 @@ async function startServer() {
 
     // Admin: user management and platform stats
     app.use("/api/admin", adminRoutes);
+
+    // Vendor subscriptions and Stripe payments
+    app.use("/api/payments", paymentRoutes);
 
     app.get("/", (_req, res) => {
       res.send("Welcome to WedPlan API!");
