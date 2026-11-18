@@ -42,6 +42,10 @@ async function startServer() {
     const auth = createAuth();
     
 
+    // Custom auth routes (e.g. /api/auth/me) must be mounted BEFORE the
+    // Better Auth catch-all, which otherwise swallows every /api/auth path.
+    app.use("/api/auth", authRoutes);
+
     // Better Auth handler must be before express.json()
     app.all("/api/auth/{*any}", toNodeHandler(auth));
     
@@ -57,8 +61,6 @@ async function startServer() {
 
     // Booking requests and status management
     app.use("/api/bookings", bookingRoutes);
-
-    app.use("/api/auth", authRoutes);
 
     app.get("/", (_req, res) => {
       res.send("Welcome to WedPlan API!");
