@@ -14,15 +14,23 @@ import { createAuth } from "../lib/auth.js";
 
 function parseArgs() {
   const args = process.argv.slice(2);
+  const positional = args.filter((arg) => !arg.startsWith("--"));
   const get = (flag: string) => {
+    const equalsPrefix = `${flag}=`;
+    const equalsArgument = args.find((arg) => arg.startsWith(equalsPrefix));
+
+    if (equalsArgument) {
+      return equalsArgument.slice(equalsPrefix.length);
+    }
+
     const index = args.indexOf(flag);
 
     return index >= 0 ? args[index + 1] : undefined;
   };
 
   return {
-    email: get("--email") ?? process.env.ADMIN_EMAIL,
-    password: get("--password") ?? process.env.ADMIN_PASSWORD,
+    email: get("--email") ?? positional[0] ?? process.env.ADMIN_EMAIL,
+    password: get("--password") ?? positional[1] ?? process.env.ADMIN_PASSWORD,
   };
 }
 
