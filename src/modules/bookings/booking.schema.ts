@@ -14,6 +14,12 @@ export const createBookingSchema = z.object({
       message: "Event date must be in the future",
     }),
 
+  eventLocation: z
+    .string()
+    .trim()
+    .min(2, "Event location is required")
+    .max(200, "Event location is too long"),
+
   message: z.string().trim().max(1000, "Message is too long").optional(),
 });
 

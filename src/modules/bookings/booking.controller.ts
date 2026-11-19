@@ -23,6 +23,7 @@ interface BookingDocument {
   serviceName: string;
   price: number;
   eventDate: Date;
+  eventLocation?: string;
   message?: string;
   status: string;
   createdAt?: Date;
@@ -130,6 +131,7 @@ export async function createBooking(req: Request, res: Response) {
       serviceName: service.serviceName, // snapshot at booking time
       price: service.price, // snapshot at booking time
       eventDate,
+      eventLocation: parsed.data.eventLocation,
       message: parsed.data.message ?? "",
       status: "pending",
       createdAt: now,
@@ -313,8 +315,31 @@ async function withServiceInfo(docs: BookingDocument[]) {
 
   const serviceMap = new Map(servicesFound.map((s) => [String(s._id), s]));
 
+  // Vendor profiles for the "Vendor information" column.
+  const vendorIds = [...new Set(docs.map((b) => String(b.vendorId)))]
+    .map((id) => toObjectId(id))
+    .filter((id): id is ObjectId => id !== null);
+
+  const vendors = vendorIds.length
+    ? (await getDB()
+        .collection("user")
+        .find(
+          { _id: { $in: vendorIds } },
+          { projection: { name: 1, businessName: 1, image: 1 } }
+        )
+        .toArray()) as unknown as Array<{
+      _id: unknown;
+      name?: string;
+      businessName?: string | null;
+      image?: string | null;
+    }>
+    : [];
+
+  const vendorMap = new Map(vendors.map((vendor) => [String(vendor._id), vendor]));
+
   return docs.map((booking) => {
     const service = serviceMap.get(String(booking.serviceId));
+    const vendor = vendorMap.get(String(booking.vendorId));
 
     return {
       id: String(booking._id),
@@ -322,9 +347,16 @@ async function withServiceInfo(docs: BookingDocument[]) {
       serviceName: booking.serviceName,
       price: booking.price,
       eventDate: booking.eventDate,
+      eventLocation: booking.eventLocation ?? null,
       message: booking.message ?? null,
       status: booking.status,
       image: service?.images?.[0] ?? null,
+      vendor: {
+        id: String(booking.vendorId),
+        name: vendor?.name ?? "WedPlan Vendor",
+        businessName: vendor?.businessName ?? null,
+        image: vendor?.image ?? null,
+      },
       createdAt: booking.createdAt ?? null,
     };
   });
@@ -361,6 +393,7 @@ async function withCustomerInfo(docs: BookingDocument[]) {
       serviceName: booking.serviceName,
       price: booking.price,
       eventDate: booking.eventDate,
+      eventLocation: booking.eventLocation ?? null,
       message: booking.message ?? null,
       status: booking.status,
       customer: {
