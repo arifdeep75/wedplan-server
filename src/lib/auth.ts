@@ -21,6 +21,17 @@ export function createAuth() {
       process.env.CLIENT_URL || "http://localhost:3000",
     ],
 
+    // The client and API are deployed on different hosts, so the session
+    // cookie must be SameSite=None; Secure in production to be sent on
+    // cross-site API requests. Locally both are http://localhost, so Lax
+    // keeps the cookie valid without HTTPS.
+    advanced: {
+      defaultCookieAttributes: {
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 6,

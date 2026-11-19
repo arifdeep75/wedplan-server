@@ -179,6 +179,24 @@ All responses are `{ success: boolean, data?, message? }`.
 Without Stripe keys the API stays honest: checkout responds with `503`
 ("Payments are not configured yet.") unless `PAYMENTS_DEMO=true`.
 
+## Deployment
+
+Any Node host works (Render, Railway, Fly.io, a VPS):
+
+1. Create a MongoDB Atlas cluster and copy the connection string.
+2. Deploy this repository with build command `npm install && npm run build` and
+   start command `npm start`.
+3. Set every required environment variable from the table above. Use the public
+   HTTPS API origin for `BETTER_AUTH_URL` and the deployed frontend origin for
+   `CLIENT_URL`.
+4. Create the admin account once with `npm run seed:admin -- --email … --password …`
+   (run it in the host's shell).
+5. In Stripe, add a webhook endpoint pointing at
+   `https://<api-host>/api/payments/webhook` for `checkout.session.completed`
+   and put its signing secret in `STRIPE_WEBHOOK_SECRET`.
+6. Add the deployed client URL to the Google OAuth redirect origins if Google
+   sign-in is enabled.
+
 ## Security notes
 
 - Client-supplied roles, vendor ids, prices and statuses are ignored; the server
