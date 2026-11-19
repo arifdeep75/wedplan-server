@@ -85,6 +85,15 @@ export async function listServices(req: Request, res: Response) {
         : null;
 
     const search = String(req.query.search ?? "").trim();
+    const location = String(req.query.location ?? "").trim();
+    const sortParam = String(req.query.sort ?? "").trim();
+
+    const sort: Record<string, 1 | -1> =
+      sortParam === "price_asc"
+        ? { price: 1, createdAt: -1 }
+        : sortParam === "price_desc"
+          ? { price: -1, createdAt: -1 }
+          : { createdAt: -1 };
 
     const filter: Record<string, unknown> = {
       status: "approved",
@@ -99,9 +108,13 @@ export async function listServices(req: Request, res: Response) {
       filter.serviceName = { $regex: escapeRegex(search), $options: "i" };
     }
 
+    if (location) {
+      filter.location = { $regex: escapeRegex(location), $options: "i" };
+    }
+
     const found = (await services()
       .find(filter)
-      .sort({ createdAt: -1 })
+      .sort(sort)
       .limit(limit)
       .toArray()) as unknown as ServiceDocument[];
 
