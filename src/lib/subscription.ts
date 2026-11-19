@@ -1,3 +1,5 @@
+import { FREE_VENDOR_SERVICE_LIMIT } from "../constants/index.js";
+
 interface SubscriptionFields {
   subscriptionPlan?: string | null;
   subscriptionExpiresAt?: Date | string | null;
@@ -15,4 +17,11 @@ export function isPremiumActive(user: SubscriptionFields | null | undefined) {
   const expires = new Date(user.subscriptionExpiresAt).getTime();
 
   return Number.isFinite(expires) && expires > Date.now();
+}
+
+export function getServicesToPause<T extends { _id: unknown }>(
+  newestFirst: T[],
+  activeLimit = FREE_VENDOR_SERVICE_LIMIT
+): T["_id"][] {
+  return newestFirst.slice(activeLimit).map((service) => service._id);
 }

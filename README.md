@@ -6,6 +6,26 @@ vendors, vendors publish services, and admins moderate the marketplace.
 Built with **Express 5**, **TypeScript**, **MongoDB** (official driver), **Better
 Auth**, **Zod** and **Stripe**.
 
+## Live links
+
+- **Live website:** https://wedplan-arifdeep75-client.vercel.app
+- **Live API:** https://wedplan-arifdeep75-server.vercel.app
+- **Client repository:** https://github.com/arifdeep75/wedplan-client
+- **Server repository:** https://github.com/arifdeep75/wedplan-server
+
+## Technology stack
+
+| Layer          | Technology                                      |
+| -------------- | ----------------------------------------------- |
+| Runtime        | Node.js 20+ (deployed on Vercel serverless)     |
+| Framework      | Express 5                                       |
+| Language       | TypeScript (ESM, NodeNext)                      |
+| Database       | MongoDB Atlas + official driver                 |
+| Auth           | Better Auth (sessions, Google OAuth, JWT/JWKS)  |
+| Validation     | Zod                                             |
+| Payments       | Stripe Checkout + signature-verified webhooks   |
+| Image uploads  | ImgBB API                                       |
+
 ## Features
 
 **Authentication & accounts**
@@ -20,17 +40,20 @@ Auth**, **Zod** and **Stripe**.
 
 **Services**
 
-- Vendors create, edit, deactivate and delete their own services.
+- Vendors create services with up to six hosted images, edit, deactivate and delete their own services.
 - New and edited services go back to `pending` for admin review.
 - Public listings only expose `approved` + active services, with search,
-  category and price filters.
+  category and price filters, pagination, and vendor/description matching.
 - Free vendors may publish up to 3 services; premium vendors are unlimited.
+- When Premium expires, the newest three eligible services stay active and
+  additional services are paused.
 - A premium badge is included on public listings for premium vendors.
 
 **Bookings**
 
 - Customers send booking requests (date + message) for a service.
 - Vendors accept or decline requests; customers can cancel while pending.
+- Duplicate active requests for the same customer, service and event date are rejected.
 - Both sides get their own booking list with populated service/vendor/customer
   summaries.
 
@@ -85,6 +108,7 @@ Other scripts:
 
 ```bash
 npm run build   # tsc to dist/
+npm test        # subscription policy tests
 npm start       # run the compiled server
 ```
 

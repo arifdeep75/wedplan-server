@@ -77,7 +77,6 @@ export async function listUsers(req: Request, res: Response) {
     const found = (await users()
       .find(filter)
       .sort({ createdAt: -1 })
-      .limit(200)
       .toArray()) as unknown as UserDocument[];
 
     const data = found.map((user) => ({
@@ -194,7 +193,14 @@ export async function getStats(_req: Request, res: Response) {
       services().countDocuments({ status: "approved" }),
       bookings().countDocuments({}),
       bookings().countDocuments({ status: "pending" }),
-      users().countDocuments({ subscriptionPlan: "premium" }),
+      users().countDocuments({
+        subscriptionPlan: "premium",
+        $or: [
+          { subscriptionExpiresAt: { $exists: false } },
+          { subscriptionExpiresAt: null },
+          { subscriptionExpiresAt: { $gt: new Date() } },
+        ],
+      }),
       transactions().countDocuments({}),
       transactions()
         .aggregate([
@@ -249,7 +255,6 @@ export async function listTransactions(_req: Request, res: Response) {
     const found = await transactions()
       .find({})
       .sort({ createdAt: -1 })
-      .limit(100)
       .toArray();
 
     const data = found.map((item) => ({

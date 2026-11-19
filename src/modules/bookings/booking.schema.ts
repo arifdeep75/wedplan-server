@@ -6,11 +6,14 @@ export const createBookingSchema = z.object({
 
   eventDate: z
     .string()
-    .min(1, "Event date is required")
-    .refine((value) => !Number.isNaN(Date.parse(value)), {
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Event date is required")
+    .refine((value) => {
+      const date = new Date(`${value}T00:00:00.000Z`);
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    }, {
       message: "Event date must be a valid date",
     })
-    .refine((value) => new Date(value).getTime() > Date.now(), {
+    .refine((value) => new Date(`${value}T00:00:00.000Z`).getTime() > Date.now(), {
       message: "Event date must be in the future",
     }),
 

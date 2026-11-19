@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { randomUUID } from "node:crypto";
 import { ObjectId } from "mongodb";
 
-import { getDB } from "../../config/db.js";
+import { getDB, getMongoClient } from "../../config/db.js";
 import { COLLECTIONS } from "../../config/collections.js";
 import { FREE_VENDOR_SERVICE_LIMIT } from "../../constants/index.js";
 import {
@@ -84,10 +84,8 @@ async function findUser(userId: string) {
 }
 
 /**
- * Marks the vendor as premium for another 12 months and records the payment.
- * Called by both the Stripe webhook and the explicit confirm endpoint, so it
- * is idempotent: renewing stacks on top of an unexpired period, and replaying
- * the same session id never creates duplicate transactions.
+ * Grants premium and marks the transaction paid atomically. Replayed webhooks
+ * see the paid ledger row and cannot extend the plan a second time.
  */
 async function activatePremium(
   userId: string,
@@ -97,66 +95,87 @@ async function activatePremium(
     currency: string;
     provider: "stripe" | "demo";
   }
-) {
+): Promise<void> {
   const id = toObjectId(userId);
 
   if (!id) {
     throw new Error("Invalid vendor id");
   }
 
-  const user = await findUser(userId);
+  const session = getMongoClient().startSession();
 
-  if (!user) {
-    throw new Error("Vendor account not found");
+  try {
+    await session.withTransaction(async () => {
+      const existing = await transactions().findOne(
+        { stripeSessionId: payment.sessionId },
+        { session }
+      );
+
+      if (existing && String(existing.vendorId) !== userId) {
+        throw new Error("Checkout session belongs to another vendor");
+      }
+
+      if (existing?.status === "paid") return;
+
+      const user = (await users().findOne({ _id: id }, { session })) as
+        | UserDocument
+        | null;
+
+      if (!user) {
+        throw new Error("Vendor account not found");
+      }
+
+      const now = new Date();
+      const currentExpiry = user.subscriptionExpiresAt
+        ? new Date(user.subscriptionExpiresAt)
+        : null;
+      const base =
+        currentExpiry && currentExpiry.getTime() > now.getTime()
+          ? currentExpiry
+          : now;
+      const expiresAt = new Date(base);
+      expiresAt.setMonth(expiresAt.getMonth() + PREMIUM_MONTHS);
+
+      await users().updateOne(
+        { _id: id },
+        {
+          $set: {
+            subscriptionPlan: "premium",
+            subscriptionExpiresAt: expiresAt,
+            updatedAt: now,
+          },
+          $unset: { expiredServiceLimitAppliedAt: "" },
+        },
+        { session }
+      );
+
+      await transactions().updateOne(
+        { stripeSessionId: payment.sessionId },
+        {
+          $set: {
+            vendorId: userId,
+            vendorName: user.name ?? "",
+            vendorEmail: user.email ?? "",
+            type: "subscription",
+            plan: "premium",
+            amount: payment.amount,
+            currency: payment.currency,
+            status: "paid",
+            provider: payment.provider,
+            paidAt: now,
+            updatedAt: now,
+          },
+          $setOnInsert: {
+            stripeSessionId: payment.sessionId,
+            createdAt: now,
+          },
+        },
+        { upsert: true, session }
+      );
+    });
+  } finally {
+    await session.endSession();
   }
-
-  const now = new Date();
-  const currentExpiry = user.subscriptionExpiresAt
-    ? new Date(user.subscriptionExpiresAt)
-    : null;
-  const base =
-    currentExpiry && currentExpiry.getTime() > now.getTime()
-      ? currentExpiry
-      : now;
-  const expiresAt = new Date(base);
-  expiresAt.setMonth(expiresAt.getMonth() + PREMIUM_MONTHS);
-
-  await users().updateOne(
-    { _id: id },
-    {
-      $set: {
-        subscriptionPlan: "premium",
-        subscriptionExpiresAt: expiresAt,
-        updatedAt: now,
-      },
-    }
-  );
-
-  await transactions().updateOne(
-    { stripeSessionId: payment.sessionId },
-    {
-      $set: {
-        vendorId: userId,
-        vendorName: user.name ?? "",
-        vendorEmail: user.email ?? "",
-        type: "subscription",
-        plan: "premium",
-        amount: payment.amount,
-        currency: payment.currency,
-        status: "paid",
-        provider: payment.provider,
-        paidAt: now,
-        updatedAt: now,
-      },
-      $setOnInsert: {
-        stripeSessionId: payment.sessionId,
-        createdAt: now,
-      },
-    },
-    { upsert: true }
-  );
-
-  return { plan: "premium" as const, expiresAt };
 }
 
 async function subscriptionSnapshot(user: AuthUser) {
@@ -249,8 +268,8 @@ export async function createCheckoutSession(_req: Request, res: Response) {
           plan: "premium",
           months: String(PREMIUM_MONTHS),
         },
-        success_url: `${clientUrl()}/dashboard/vendor?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${clientUrl()}/dashboard/vendor?payment=cancelled`,
+        success_url: `${clientUrl()}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${clientUrl()}/payment/cancel`,
       });
 
       if (!session.url) {
@@ -460,7 +479,10 @@ export async function stripeWebhook(req: Request, res: Response) {
       });
     }
 
-    if (event.type === "checkout.session.completed") {
+    if (
+      event.type === "checkout.session.completed" ||
+      event.type === "checkout.session.async_payment_succeeded"
+    ) {
       const session = event.data.object;
 
       if (
@@ -474,6 +496,18 @@ export async function stripeWebhook(req: Request, res: Response) {
           provider: "stripe",
         });
       }
+    } else if (
+      event.type === "checkout.session.expired" ||
+      event.type === "checkout.session.async_payment_failed"
+    ) {
+      const session = event.data.object;
+      const status =
+        event.type === "checkout.session.expired" ? "expired" : "failed";
+
+      await transactions().updateOne(
+        { stripeSessionId: session.id, status: "pending" },
+        { $set: { status, updatedAt: new Date() } }
+      );
     }
 
     return res.status(200).json({ received: true });

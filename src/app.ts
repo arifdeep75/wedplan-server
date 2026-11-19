@@ -2,7 +2,8 @@ import express from "express";
 import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
 
-import { connectDB } from "./config/db.js";
+import { connectDB, getDB } from "./config/db.js";
+import { COLLECTIONS } from "./config/collections.js";
 import { createAuth } from "./lib/auth.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import uploadRoutes from "./modules/uploads/upload.routes.js";
@@ -21,6 +22,21 @@ import { stripeWebhook } from "./modules/payments/payment.controller.js";
  */
 export async function createApp() {
   await connectDB();
+
+  await Promise.all([
+    getDB()
+      .collection(COLLECTIONS.BOOKINGS)
+      .createIndex(
+        { activeBookingKey: 1 },
+        { name: "unique_active_booking_key", unique: true, sparse: true }
+      ),
+    getDB()
+      .collection(COLLECTIONS.TRANSACTIONS)
+      .createIndex(
+        { stripeSessionId: 1 },
+        { name: "unique_stripe_session_id", unique: true, sparse: true }
+      ),
+  ]);
 
   const app = express();
   const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
@@ -57,11 +73,11 @@ export async function createApp() {
     stripeWebhook
   );
 
-  // Parse JSON bodies for all API routes (uploads re-mounts with a bigger limit)
-  app.use(express.json());
+  // Base64 image uploads can exceed Express's default JSON body limit.
+  app.use("/api/uploads", express.json({ limit: "7mb" }), uploadRoutes);
 
-  // Profile image uploads need a larger JSON body limit (base64 payloads)
-  app.use("/api/uploads", express.json({ limit: "6mb" }), uploadRoutes);
+  // Parse JSON bodies for all remaining API routes.
+  app.use(express.json());
 
   // Service browsing + vendor/admin service management
   app.use("/api/services", serviceRoutes);

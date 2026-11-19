@@ -40,3 +40,7 @@ export function getDB(): Db {
 
   return database;
 }
+
+export function getMongoClient(): MongoClient {
+  return client;
+}

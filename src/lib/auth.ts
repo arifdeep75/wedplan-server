@@ -5,7 +5,7 @@ import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import { jwt, bearer } from "better-auth/plugins";
 
 import { getDB } from "../config/db.js";
-import { registerSchema } from "../modules/auth/auth.schema.js";
+import { passwordSchema, registerSchema } from "../modules/auth/auth.schema.js";
 
 export function createAuth() {
   const googleClientId = process.env.GOOGLE_CLIENT_ID;
@@ -70,13 +70,14 @@ export function createAuth() {
 
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== "/sign-up/email") {
-          return;
-        }
+        const validation =
+          ctx.path === "/sign-up/email"
+            ? registerSchema.safeParse(ctx.body)
+            : ctx.path === "/change-password"
+              ? passwordSchema.safeParse(ctx.body?.newPassword)
+              : null;
 
-        const validation = registerSchema.safeParse(ctx.body);
-
-        if (!validation.success) {
+        if (validation && !validation.success) {
           throw new APIError("BAD_REQUEST", {
             message: validation.error.issues[0]?.message || "Invalid registration information",
           });

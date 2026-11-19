@@ -1,8 +1,9 @@
 
 import type { Request, Response } from "express";
-import { ObjectId } from "mongodb";
+import { MongoServerError, ObjectId } from "mongodb";
 import { getDB } from "../../config/db.js";
 import { COLLECTIONS } from "../../config/collections.js";
+import { enforceExpiredPlanServiceLimits } from "../services/service.controller.js";
 import { createBookingSchema, bookingStatusSchema } from "./booking.schema.js";
 import type { AuthUser } from "../../middleware/auth.middleware.js";
 
@@ -61,6 +62,7 @@ function currentUser(res: Response): AuthUser {
 export async function createBooking(req: Request, res: Response) {
   try {
     const user = currentUser(res);
+    await enforceExpiredPlanServiceLimits();
 
     const parsed = createBookingSchema.safeParse(req.body);
 
@@ -102,17 +104,19 @@ export async function createBooking(req: Request, res: Response) {
     }
 
     // Prevent duplicate active bookings for the same service + date
-    const eventDate = new Date(parsed.data.eventDate);
-    const startOfDay = new Date(eventDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(eventDate);
-    endOfDay.setHours(23, 59, 59, 999);
+    const eventDateKey = parsed.data.eventDate;
+    const eventDate = new Date(`${eventDateKey}T00:00:00.000Z`);
+    const nextDay = new Date(eventDate);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
 
     const duplicate = await bookings().findOne({
       customerId: user.id,
       serviceId: String(service._id),
-      eventDate: { $gte: startOfDay, $lte: endOfDay },
       status: { $in: ["pending", "accepted"] },
+      $or: [
+        { eventDateKey },
+        { eventDate: { $gte: eventDate, $lt: nextDay } },
+      ],
     });
 
     if (duplicate) {
@@ -124,19 +128,38 @@ export async function createBooking(req: Request, res: Response) {
 
     const now = new Date();
 
-    const result = await bookings().insertOne({
-      serviceId: String(service._id),
-      customerId: user.id, // server-derived
-      vendorId: String(service.vendorId), // server-derived
-      serviceName: service.serviceName, // snapshot at booking time
-      price: service.price, // snapshot at booking time
-      eventDate,
-      eventLocation: parsed.data.eventLocation,
-      message: parsed.data.message ?? "",
-      status: "pending",
-      createdAt: now,
-      updatedAt: now,
-    });
+    let result;
+
+    try {
+      result = await bookings().insertOne({
+        serviceId: String(service._id),
+        customerId: user.id, // server-derived
+        vendorId: String(service.vendorId), // server-derived
+        serviceName: service.serviceName, // snapshot at booking time
+        price: service.price, // snapshot at booking time
+        eventDate,
+        eventDateKey,
+        activeBookingKey: JSON.stringify([
+          user.id,
+          String(service._id),
+          eventDateKey,
+        ]),
+        eventLocation: parsed.data.eventLocation,
+        message: parsed.data.message ?? "",
+        status: "pending",
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      if (error instanceof MongoServerError && error.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          message: "You already have a booking for this service on that date",
+        });
+      }
+
+      throw error;
+    }
 
     return res.status(201).json({
       success: true,
@@ -207,8 +230,7 @@ export async function listVendorBookings(_req: Request, res: Response) {
 /* Shared status update (owner checks per role)                        */
 /* ------------------------------------------------------------------ */
 
-// Vendor accepts/rejects bookings for their services.
-// Customer cancels their own pending/accepted bookings.
+// Vendors accept/reject and customers cancel only while a booking is pending.
 export async function updateBookingStatus(req: Request, res: Response) {
   try {
     const user = currentUser(res);
@@ -264,21 +286,33 @@ export async function updateBookingStatus(req: Request, res: Response) {
     }
 
     if (isCustomer) {
-      if (
-        (booking.status !== "pending" && booking.status !== "accepted") ||
-        nextStatus !== "cancelled"
-      ) {
+      if (booking.status !== "pending" || nextStatus !== "cancelled") {
         return res.status(403).json({
           success: false,
-          message: "You can only cancel your own pending or accepted bookings",
+          message: "You can only cancel your own pending bookings",
         });
       }
     }
 
-    await bookings().updateOne(
-      { _id: id },
-      { $set: { status: nextStatus, updatedAt: new Date() } }
+    const updates =
+      nextStatus === "rejected" || nextStatus === "cancelled"
+        ? {
+            $set: { status: nextStatus, updatedAt: new Date() },
+            $unset: { activeBookingKey: "" },
+          }
+        : { $set: { status: nextStatus, updatedAt: new Date() } };
+
+    const result = await bookings().updateOne(
+      { _id: id, status: "pending" },
+      updates
     );
+
+    if (!result.matchedCount) {
+      return res.status(409).json({
+        success: false,
+        message: "This booking has already been processed",
+      });
+    }
 
     return res.status(200).json({
       success: true,
