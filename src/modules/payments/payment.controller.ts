@@ -175,6 +175,7 @@ async function subscriptionSnapshot(user: AuthUser) {
     plan: premium ? "premium" : "free",
     expiresAt: premium ? (doc?.subscriptionExpiresAt ?? null) : null,
     stripeConfigured: Boolean(getStripe()),
+    webhookConfigured: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
     demoEnabled: paymentsDemoEnabled(),
     price: {
       amount: PREMIUM_PRICE_CENTS,
@@ -216,6 +217,16 @@ export async function createCheckoutSession(_req: Request, res: Response) {
     const stripe = getStripe();
 
     if (stripe) {
+      // Money must never be taken unless the webhook that grants access is
+      // configured; otherwise a successful payment could not be fulfilled.
+      if (!process.env.STRIPE_WEBHOOK_SECRET) {
+        return res.status(503).json({
+          success: false,
+          message:
+            "Payments are not fully configured yet (missing webhook secret). Please try again later.",
+        });
+      }
+
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         line_items: [
@@ -291,8 +302,10 @@ export async function createCheckoutSession(_req: Request, res: Response) {
   }
 }
 
-// Called when Stripe redirects back with `session_id`. Verifies ownership and
-// payment state before granting premium, so a crafted URL cannot unlock it.
+// Called when Stripe redirects back with `session_id`. It verifies that the
+// session belongs to this vendor and is actually paid, then reports the
+// current plan. It deliberately does NOT grant premium: access is activated
+// only by the signature-verified `checkout.session.completed` webhook.
 export async function confirmCheckout(req: Request, res: Response) {
   try {
     const user = currentUser(res);
@@ -330,19 +343,13 @@ export async function confirmCheckout(req: Request, res: Response) {
       });
     }
 
-    await activatePremium(user.id, {
-      sessionId: session.id,
-      amount: session.amount_total ?? PREMIUM_PRICE_CENTS,
-      currency: session.currency ?? PREMIUM_CURRENCY,
-      provider: "stripe",
-    });
-
     const data = await subscriptionSnapshot(user);
 
     return res.status(200).json({
       success: true,
-      message: "Premium activated",
-      data,
+      message:
+        "Payment verified. Premium activates as soon as Stripe delivers the webhook.",
+      data: { ...data, paymentVerified: true },
     });
   } catch (error) {
     console.error("Confirm checkout error:", error);
@@ -358,7 +365,7 @@ export async function confirmCheckout(req: Request, res: Response) {
 // so it can never be confused with real revenue.
 export async function activateDemoPremium(_req: Request, res: Response) {
   try {
-    if (!paymentsDemoEnabled()) {
+    if (getStripe() || !paymentsDemoEnabled()) {
       return res.status(403).json({
         success: false,
         message: "Demo payments are disabled",

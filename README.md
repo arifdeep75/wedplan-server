@@ -49,10 +49,15 @@ Auth**, **Zod** and **Stripe**.
 **Premium subscriptions**
 
 - One-time Stripe Checkout payment (`$49`) that grants 12 months of premium.
-- `POST /api/payments/confirm` verifies the Checkout session, that it belongs to
-  the requesting vendor, and that it is actually paid, before granting premium.
-- `POST /api/payments/webhook` verifies the Stripe signature against
+- **Premium is granted only by the signature-verified Stripe webhook**
+  (`checkout.session.completed`), never by a browser redirect.
+- `POST /api/payments/confirm` verifies that the Checkout session belongs to the
+  requesting vendor and is paid, then reports the current plan — it does not
+  unlock premium itself.
+- `POST /api/payments/webhook` verifies the signature against
   `STRIPE_WEBHOOK_SECRET` and is idempotent per Checkout session.
+- Checkout is refused (503) when Stripe is configured without a webhook secret,
+  so a payment can never succeed without a way to fulfil it.
 - Renewing stacks another 12 months on top of an unexpired period.
 - Demo mode (`PAYMENTS_DEMO=true`) exists **only** for evaluation environments
   without Stripe keys. It records transactions with `provider: "demo"` and
@@ -174,10 +179,10 @@ All responses are `{ success: boolean, data?, message? }`.
    server.
 4. Premium success redirects to
    `CLIENT_URL/dashboard/vendor?payment=success&session_id=…`; the client calls
-   `/api/payments/confirm`, which is safe to replay.
-
-Without Stripe keys the API stays honest: checkout responds with `503`
-("Payments are not configured yet.") unless `PAYMENTS_DEMO=true`.
+   `/api/payments/confirm` to verify the session, then waits for the webhook to
+   unlock premium.
+5. Without Stripe keys the API stays honest: checkout responds with `503`
+   ("Payments are not configured yet.") unless `PAYMENTS_DEMO=true`.
 
 ## Deployment
 
