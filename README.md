@@ -239,6 +239,10 @@ Any Node host works (Render, Railway, Fly.io, a VPS):
   services).
 - The Stripe webhook is signature-verified and idempotent.
 - No public admin registration — admins are created with `npm run seed:admin`.
+- Environment files are git-ignored. Secrets belong in local env files and the
+  deployment provider's environment settings — never in the repository.
+- If a credential is ever exposed, rotate it immediately. Removing it from the
+  current tree does not remove it from git history or caches.
 
 ## Project structure
 
