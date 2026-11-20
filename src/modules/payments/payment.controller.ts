@@ -259,6 +259,7 @@ export async function createCheckoutSession(_req: Request, res: Response) {
 
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
+        allowed_payment_method_types: ["card"],
         line_items: [
           {
             quantity: 1,

@@ -195,19 +195,22 @@ All responses are `{ success: boolean, data?, message? }`.
 ## Stripe setup
 
 1. Set `STRIPE_SECRET_KEY` (test mode is fine).
-2. Forward events locally:
+2. Enable card payments in Stripe for the same mode as the secret key. Checkout
+   filters its eligible payment methods to cards; Stripe must have card payments
+   enabled for the account and currency.
+3. Forward events locally:
 
    ```bash
    stripe listen --forward-to localhost:5000/api/payments/webhook
    ```
 
-3. Put the printed signing secret in `STRIPE_WEBHOOK_SECRET` and restart the
+4. Put the printed signing secret in `STRIPE_WEBHOOK_SECRET` and restart the
    server.
-4. Premium success redirects to
+5. Premium success redirects to
    `CLIENT_URL/payment/success?session_id=…`; the client calls
    `/api/payments/confirm` to verify the session, then waits for the webhook to
    unlock premium. A cancelled checkout returns to `CLIENT_URL/payment/cancel`.
-5. Without Stripe keys the API responds with `503` and does not grant premium.
+6. Without Stripe keys the API responds with `503` and does not grant premium.
 
 ## Deployment
 
