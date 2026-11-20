@@ -51,7 +51,7 @@ Auth**, **Zod** and **Stripe**.
 
 **Bookings**
 
-- Customers send booking requests (date + message) for a service.
+- Customers send booking requests (date, event location + message) for a service.
 - Vendors accept or decline requests; customers can cancel while pending.
 - Duplicate active requests for the same customer, service and event date are rejected.
 - Both sides get their own booking list with populated service/vendor/customer
@@ -60,7 +60,7 @@ Auth**, **Zod** and **Stripe**.
 **Profiles & uploads**
 
 - Name, image, password and vendor business name can be updated.
-- Profile images are uploaded to ImgBB (`IMGBB_API_KEY`).
+- Profile and service images are uploaded to ImgBB (`IMGBB_API_KEY`).
 
 **Admin**
 
@@ -93,7 +93,7 @@ Requirements: Node.js 20+, a MongoDB database, npm.
 
 ```bash
 npm install
-cp .env.example .env     # fill in the values
+# create .env manually and fill in the values below
 npm run seed             # optional demo vendors + services
 npm run dev              # http://localhost:5000
 ```
@@ -113,6 +113,9 @@ npm start       # run the compiled server
 ```
 
 ## Environment variables
+
+Create `.env` manually. It is git-ignored, as are `.env.local` and every other
+env file — never commit real credentials.
 
 | Variable               | Required | Description                                                    |
 | ---------------------- | -------- | -------------------------------------------------------------- |
@@ -202,9 +205,9 @@ All responses are `{ success: boolean, data?, message? }`.
 3. Put the printed signing secret in `STRIPE_WEBHOOK_SECRET` and restart the
    server.
 4. Premium success redirects to
-   `CLIENT_URL/dashboard/vendor?payment=success&session_id=…`; the client calls
+   `CLIENT_URL/payment/success?session_id=…`; the client calls
    `/api/payments/confirm` to verify the session, then waits for the webhook to
-   unlock premium.
+   unlock premium. A cancelled checkout returns to `CLIENT_URL/payment/cancel`.
 5. Without Stripe keys the API stays honest: checkout responds with `503`
    ("Payments are not configured yet.") unless `PAYMENTS_DEMO=true`.
 
@@ -254,5 +257,6 @@ src/
     services/    listings, moderation, premium limits
     uploads/     ImgBB image upload
   scripts/       demo seed and admin seed
-  server.ts      app wiring and route mounting
+  app.ts         Express app wiring and route mounting
+  server.ts      process entry point
 ```
