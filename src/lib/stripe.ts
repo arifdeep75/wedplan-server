@@ -5,7 +5,36 @@ export const PREMIUM_MONTHS = 12;
 export const PREMIUM_PRICE_CENTS = 4900; // $49.00
 export const PREMIUM_CURRENCY = "usd";
 
+export type PremiumCheckoutSession = Pick<
+  Stripe.Checkout.Session,
+  | "mode"
+  | "payment_status"
+  | "amount_total"
+  | "currency"
+  | "metadata"
+  | "client_reference_id"
+>;
+
 let client: Stripe | null = null;
+
+export function isValidPremiumCheckoutSession(
+  session: PremiumCheckoutSession,
+  vendorId?: string
+): boolean {
+  const sessionVendorId = session.metadata?.vendorId;
+
+  return (
+    session.mode === "payment" &&
+    session.payment_status === "paid" &&
+    session.amount_total === PREMIUM_PRICE_CENTS &&
+    session.currency === PREMIUM_CURRENCY &&
+    session.metadata?.plan === "premium" &&
+    session.metadata.months === String(PREMIUM_MONTHS) &&
+    Boolean(sessionVendorId) &&
+    session.client_reference_id === sessionVendorId &&
+    (vendorId === undefined || sessionVendorId === vendorId)
+  );
+}
 
 /**
  * Returns a Stripe client only when the secret key is configured.
@@ -23,16 +52,27 @@ export function getStripe(): Stripe | null {
   return client;
 }
 
-/**
- * Explicit demo mode for environments without Stripe keys. It is never
- * enabled silently: `PAYMENTS_DEMO=true` must be set, and every recorded
- * transaction is labelled `provider: "demo"` so nobody mistakes it for a
- * real payment.
- */
-export function paymentsDemoEnabled(): boolean {
-  return process.env.PAYMENTS_DEMO === "true";
-}
+export function clientUrl(): string | null {
+  const configured = process.env.CLIENT_URL?.trim();
 
-export function clientUrl(): string {
-  return process.env.CLIENT_URL || "http://localhost:3000";
+  if (!configured) {
+    return process.env.NODE_ENV === "production"
+      ? null
+      : "http://localhost:3000";
+  }
+
+  try {
+    const url = new URL(configured);
+
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      (process.env.NODE_ENV === "production" && url.protocol !== "https:")
+    ) {
+      return null;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
 }

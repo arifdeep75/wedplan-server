@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test src/lib/subscription.test.ts",
+    "test": "tsx --test src/lib/subscription.test.ts src/lib/stripe.test.ts",
     "dev": "nodemon --watch src --ext ts --exec tsx src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc",

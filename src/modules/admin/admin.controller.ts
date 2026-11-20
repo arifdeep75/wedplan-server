@@ -204,7 +204,7 @@ export async function getStats(_req: Request, res: Response) {
       transactions().countDocuments({}),
       transactions()
         .aggregate([
-          { $match: { status: "paid" } },
+          { $match: { status: "paid", provider: { $ne: "demo" } } },
           {
             $group: {
               _id: null,

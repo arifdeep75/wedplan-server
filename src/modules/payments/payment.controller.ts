@@ -1,5 +1,4 @@
 import type { Request, Response } from "express";
-import { randomUUID } from "node:crypto";
 import { ObjectId } from "mongodb";
 
 import { getDB, getMongoClient } from "../../config/db.js";
@@ -11,7 +10,7 @@ import {
   PREMIUM_PRICE_CENTS,
   clientUrl,
   getStripe,
-  paymentsDemoEnabled,
+  isValidPremiumCheckoutSession,
 } from "../../lib/stripe.js";
 import { isPremiumActive } from "../../lib/subscription.js";
 import type { AuthUser } from "../../middleware/auth.middleware.js";
@@ -93,7 +92,7 @@ async function activatePremium(
     sessionId: string;
     amount: number;
     currency: string;
-    provider: "stripe" | "demo";
+    provider: "stripe";
   }
 ): Promise<void> {
   const id = toObjectId(userId);
@@ -183,11 +182,15 @@ async function subscriptionSnapshot(user: AuthUser) {
   const premium = isPremiumActive(doc);
   const [history, paidCount] = await Promise.all([
     transactions()
-      .find({ vendorId: user.id })
+      .find({ vendorId: user.id, provider: { $ne: "demo" } })
       .sort({ createdAt: -1 })
       .limit(10)
       .toArray() as unknown as Promise<TransactionDocument[]>,
-    transactions().countDocuments({ vendorId: user.id, status: "paid" }),
+    transactions().countDocuments({
+      vendorId: user.id,
+      status: "paid",
+      provider: { $ne: "demo" },
+    }),
   ]);
 
   return {
@@ -195,7 +198,6 @@ async function subscriptionSnapshot(user: AuthUser) {
     expiresAt: premium ? (doc?.subscriptionExpiresAt ?? null) : null,
     stripeConfigured: Boolean(getStripe()),
     webhookConfigured: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
-    demoEnabled: paymentsDemoEnabled(),
     price: {
       amount: PREMIUM_PRICE_CENTS,
       currency: PREMIUM_CURRENCY,
@@ -228,8 +230,7 @@ export async function getSubscriptionStatus(_req: Request, res: Response) {
   }
 }
 
-// Starts a Stripe Checkout session. Without Stripe keys this fails honestly
-// (503) unless explicit demo mode is enabled.
+// Starts a real Stripe Checkout session. Missing configuration fails honestly.
 export async function createCheckoutSession(_req: Request, res: Response) {
   try {
     const user = currentUser(res);
@@ -243,6 +244,16 @@ export async function createCheckoutSession(_req: Request, res: Response) {
           success: false,
           message:
             "Payments are not fully configured yet (missing webhook secret). Please try again later.",
+        });
+      }
+
+      const frontendUrl = clientUrl();
+
+      if (!frontendUrl) {
+        return res.status(503).json({
+          success: false,
+          message:
+            "Payments are not fully configured yet (missing a valid HTTPS client URL). Please try again later.",
         });
       }
 
@@ -268,8 +279,8 @@ export async function createCheckoutSession(_req: Request, res: Response) {
           plan: "premium",
           months: String(PREMIUM_MONTHS),
         },
-        success_url: `${clientUrl()}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${clientUrl()}/payment/cancel`,
+        success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${frontendUrl}/payment/cancel`,
       });
 
       if (!session.url) {
@@ -300,10 +311,6 @@ export async function createCheckoutSession(_req: Request, res: Response) {
         success: true,
         data: { url: session.url, sessionId: session.id },
       });
-    }
-
-    if (paymentsDemoEnabled()) {
-      return res.status(200).json({ success: true, data: { demo: true } });
     }
 
     return res.status(503).json({
@@ -362,6 +369,13 @@ export async function confirmCheckout(req: Request, res: Response) {
       });
     }
 
+    if (!isValidPremiumCheckoutSession(session, user.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "This checkout session is not a valid Premium payment",
+      });
+    }
+
     const data = await subscriptionSnapshot(user);
 
     return res.status(200).json({
@@ -380,49 +394,12 @@ export async function confirmCheckout(req: Request, res: Response) {
   }
 }
 
-// Explicit demo activation (PAYMENTS_DEMO=true). Recorded as provider "demo"
-// so it can never be confused with real revenue.
-export async function activateDemoPremium(_req: Request, res: Response) {
-  try {
-    if (getStripe() || !paymentsDemoEnabled()) {
-      return res.status(403).json({
-        success: false,
-        message: "Demo payments are disabled",
-      });
-    }
-
-    const user = currentUser(res);
-
-    await activatePremium(user.id, {
-      sessionId: `demo_${Date.now()}_${randomUUID()}`,
-      amount: 0,
-      currency: PREMIUM_CURRENCY,
-      provider: "demo",
-    });
-
-    const data = await subscriptionSnapshot(user);
-
-    return res.status(200).json({
-      success: true,
-      message: "Demo premium activated — no real payment was taken.",
-      data,
-    });
-  } catch (error) {
-    console.error("Demo activation error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to activate the demo plan",
-    });
-  }
-}
-
 export async function listMyTransactions(_req: Request, res: Response) {
   try {
     const user = currentUser(res);
 
     const found = (await transactions()
-      .find({ vendorId: user.id })
+      .find({ vendorId: user.id, provider: { $ne: "demo" } })
       .sort({ createdAt: -1 })
       .limit(50)
       .toArray()) as unknown as TransactionDocument[];
@@ -489,6 +466,13 @@ export async function stripeWebhook(req: Request, res: Response) {
         session.payment_status === "paid" &&
         typeof session.metadata?.vendorId === "string"
       ) {
+        if (!isValidPremiumCheckoutSession(session)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid Premium checkout session",
+          });
+        }
+
         await activatePremium(session.metadata.vendorId, {
           sessionId: session.id,
           amount: session.amount_total ?? 0,

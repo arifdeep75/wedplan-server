@@ -80,12 +80,13 @@ Auth**, **Zod** and **Stripe**.
 - `POST /api/payments/webhook` verifies the signature against
   `STRIPE_WEBHOOK_SECRET` and is idempotent per Checkout session.
 - Checkout is refused (503) when Stripe is configured without a webhook secret,
-  so a payment can never succeed without a way to fulfil it.
+  or a valid frontend return URL, so checkout cannot be started without a way
+  to fulfil the payment and return the vendor to the app.
+- Checkout is hosted by Stripe, so a publishable key is not needed by this
+  integration; keep the secret key on the server only.
 - Renewing stacks another 12 months on top of an unexpired period.
-- Demo mode (`PAYMENTS_DEMO=true`) exists **only** for evaluation environments
-  without Stripe keys. It records transactions with `provider: "demo"` and
-  `amount: 0`, and is never presented as real revenue. Without Stripe keys and
-  without demo mode, checkout returns `503` instead of faking success.
+- If Stripe is not configured, checkout returns `503`; Premium is never
+  granted through a simulated payment.
 
 ## Getting started
 
@@ -130,7 +131,6 @@ env file — never commit real credentials.
 | `IMGBB_API_KEY`        | no       | Enables profile/service image uploads                          |
 | `STRIPE_SECRET_KEY`    | no       | Enables real Stripe Checkout                                   |
 | `STRIPE_WEBHOOK_SECRET`| no       | Enables the verified Stripe webhook                            |
-| `PAYMENTS_DEMO`        | no       | `true` activates demo premium (no charge, labelled as demo)    |
 
 ## API overview
 
@@ -178,10 +178,9 @@ All responses are `{ success: boolean, data?, message? }`.
 | Method | Path                        | Description                                    |
 | ------ | --------------------------- | ---------------------------------------------- |
 | GET    | `/api/payments/status`      | Plan, expiry, price, recent transactions       |
-| POST   | `/api/payments/checkout`    | Stripe Checkout URL, or `{ demo: true }`       |
+| POST   | `/api/payments/checkout`    | Stripe Checkout URL                            |
 | POST   | `/api/payments/confirm`     | Verify a Checkout session after redirect       |
-| POST   | `/api/payments/demo-activate` | Demo mode activation (requires `PAYMENTS_DEMO`) |
-| GET    | `/api/payments/mine`        | Full transaction history                       |
+| GET    | `/api/payments/mine`        | Vendor's Stripe history; complimentary entries omitted |
 | POST   | `/api/payments/webhook`     | Stripe webhook (raw body, signature verified)  |
 
 **Admin**
@@ -208,8 +207,7 @@ All responses are `{ success: boolean, data?, message? }`.
    `CLIENT_URL/payment/success?session_id=…`; the client calls
    `/api/payments/confirm` to verify the session, then waits for the webhook to
    unlock premium. A cancelled checkout returns to `CLIENT_URL/payment/cancel`.
-5. Without Stripe keys the API stays honest: checkout responds with `503`
-   ("Payments are not configured yet.") unless `PAYMENTS_DEMO=true`.
+5. Without Stripe keys the API responds with `503` and does not grant premium.
 
 ## Deployment
 
@@ -224,8 +222,12 @@ Any Node host works (Render, Railway, Fly.io, a VPS):
 4. Create the admin account once with `npm run seed:admin -- --email … --password …`
    (run it in the host's shell).
 5. In Stripe, add a webhook endpoint pointing at
-   `https://<api-host>/api/payments/webhook` for `checkout.session.completed`
-   and put its signing secret in `STRIPE_WEBHOOK_SECRET`.
+   `https://<api-host>/api/payments/webhook` for
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.expired`, and `checkout.session.async_payment_failed`.
+   Put that endpoint's signing secret in `STRIPE_WEBHOOK_SECRET`. Test and live
+   mode use different signing secrets; configure the matching one on the API
+   host.
 6. Add the deployed client URL to the Google OAuth redirect origins if Google
    sign-in is enabled.
 
